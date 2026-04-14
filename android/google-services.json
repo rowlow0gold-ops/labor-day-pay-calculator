@@ -1,0 +1,55 @@
+{
+  "project_info": {
+    "project_number": "888275904157",
+    "project_id": "abor-day-pay-calculator",
+    "storage_bucket": "abor-day-pay-calculator.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:888275904157:android:699356fb19ae61cdbb5674",
+        "android_client_info": {
+          "package_name": "com.jj.labordaypay"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "888275904157-68ip81djsc54mm6tbdtrr4nlpjdl10ud.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.jj.labordaypay",
+            "certificate_hash": "ed297af18828fecdd9bdabaadb6d129a3888f1ec"
+          }
+        },
+        {
+          "client_id": "888275904157-tbgm02mc2493c8d7ekmno3ll2ssnghsc.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.jj.labordaypay",
+            "certificate_hash": "d191b2e3b1200d3dbcde38e9135011e986e646b7"
+          }
+        },
+        {
+          "client_id": "888275904157-pvdg952uq56707uniqpp423t6337epmm.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDZK0UYA8jxEbT0QI9s7x3b7zG7nHrochY"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "888275904157-pvdg952uq56707uniqpp423t6337epmm.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

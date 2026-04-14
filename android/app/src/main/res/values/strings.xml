@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Default (English) — used worldwide for any locale without a specific override -->
+    <string name="app_name">Pay Calculator</string>
+</resources>
