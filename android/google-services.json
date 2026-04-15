@@ -30,6 +30,14 @@
           }
         },
         {
+          "client_id": "888275904157-vq7mive12ou7qa5lj2b63hu4ho3s1cdg.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.jj.labordaypay",
+            "certificate_hash": "5302ccc64abcff854984237cd2ff3a835d17e3ad"
+          }
+        },
+        {
           "client_id": "888275904157-pvdg952uq56707uniqpp423t6337epmm.apps.googleusercontent.com",
           "client_type": 3
         }

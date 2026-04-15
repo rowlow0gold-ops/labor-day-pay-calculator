@@ -1,0 +1,35 @@
+rules_version = '2';
+
+// Security rules for Labor Day Pay
+// Paths used by the app:
+//   /tax_rates/{countryCode}              -> shared reference data (read-only for clients)
+//   /users/{uid}/security/key             -> per-user encryption key (owner only)
+//   /users/{uid}/state/snapshot           -> per-user sync snapshot (owner only)
+//   /users/{uid}/...anything under user   -> private to that user
+//
+// Deny-by-default: anything not explicitly allowed below is blocked.
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // --- Shared tax rate reference data ---
+    // Any signed-in user can read tax rates.
+    // No client can write — updates happen via Firebase Console or a Cloud Function.
+    match /tax_rates/{countryCode} {
+      allow read: if request.auth != null;
+      allow write: if false;
+    }
+
+    // --- Per-user private data ---
+    // Only the authenticated user can read or write anything under their own uid.
+    match /users/{uid}/{document=**} {
+      allow read, write: if request.auth != null
+                         && request.auth.uid == uid;
+    }
+
+    // Explicit deny for anything else.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

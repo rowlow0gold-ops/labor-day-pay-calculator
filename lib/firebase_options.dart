@@ -27,10 +27,9 @@ class DefaultFirebaseOptions {
     appId: '1:888275904157:web:4f87d615c3bd2fd8bb5674',
   );
 
-  // TODO: Add Android config when ready to publish
   static const FirebaseOptions android = FirebaseOptions(
-    apiKey: 'TODO',
-    appId: 'TODO',
+    apiKey: 'AIzaSyDZK0UYA8jxEbT0QI9s7x3b7zG7nHrochY',
+    appId: '1:888275904157:android:d3849e1b026450d1bb5674',
     messagingSenderId: '888275904157',
     projectId: 'abor-day-pay-calculator',
     storageBucket: 'abor-day-pay-calculator.firebasestorage.app',

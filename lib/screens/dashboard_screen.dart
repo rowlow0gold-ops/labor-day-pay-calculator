@@ -14,7 +14,8 @@ class DashboardScreen extends StatefulWidget {
 }
 
 class _DashboardScreenState extends State<DashboardScreen> {
-  bool _showYearly = false;
+  // 0 = monthly, 1 = yearly, 2 = year comparison
+  int _viewMode = 0;
   late int _selectedYear;
   late int _selectedMonth;
 
@@ -51,28 +52,57 @@ class _DashboardScreenState extends State<DashboardScreen> {
     return Scaffold(
       appBar: AppBar(
         title: Text(l.get('dashboard_title')),
-        actions: [
-          SegmentedButton<bool>(
-            showSelectedIcon: false,
-            segments: [
-              ButtonSegment(value: false, label: Text(l.get('monthly_summary'), style: const TextStyle(fontSize: 12), maxLines: 1, overflow: TextOverflow.ellipsis)),
-              ButtonSegment(value: true, label: Text(l.get('yearly_summary'), style: const TextStyle(fontSize: 12), maxLines: 1, overflow: TextOverflow.ellipsis)),
-            ],
-            selected: {_showYearly},
-            onSelectionChanged: (s) => setState(() => _showYearly = s.first),
-          ),
-          const SizedBox(width: 8),
-        ],
+        centerTitle: true,
       ),
       body: Column(
         children: [
-          // Month/Year selector
-          _buildDateSelector(l),
+          // Centered view-mode selector: Monthly / Yearly / Year comparison
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
+            child: Center(
+              child: SegmentedButton<int>(
+                showSelectedIcon: false,
+                style: ButtonStyle(
+                  visualDensity: VisualDensity.compact,
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  padding: WidgetStateProperty.all(
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 6)),
+                ),
+                segments: [
+                  ButtonSegment(
+                      value: 0,
+                      label: Text(l.get('monthly_summary'),
+                          style: const TextStyle(fontSize: 12),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis)),
+                  ButtonSegment(
+                      value: 1,
+                      label: Text(l.get('yearly_summary'),
+                          style: const TextStyle(fontSize: 12),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis)),
+                  ButtonSegment(
+                      value: 2,
+                      label: Text(l.get('year_comparison'),
+                          style: const TextStyle(fontSize: 12),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis)),
+                ],
+                selected: {_viewMode},
+                onSelectionChanged: (s) =>
+                    setState(() => _viewMode = s.first),
+              ),
+            ),
+          ),
+          // Month/Year selector (hidden in comparison mode)
+          if (_viewMode != 2) _buildDateSelector(l),
           // Content
           Expanded(
-            child: _showYearly
-                ? _buildYearlyView(app, l)
-                : _buildMonthlyView(app, l),
+            child: _viewMode == 2
+                ? _buildYearCompareView(app, l)
+                : _viewMode == 1
+                    ? _buildYearlyView(app, l)
+                    : _buildMonthlyView(app, l),
           ),
         ],
       ),
@@ -80,7 +110,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   Widget _buildDateSelector(AppLocalizations l) {
-    if (_showYearly) {
+    if (_viewMode == 1) {
       // Year selector
       return Container(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
@@ -416,8 +446,32 @@ class _DashboardScreenState extends State<DashboardScreen> {
           _buildMonthlyChart(l, monthlyData, monthlyWorkDays, monthlyTotalMd, monthlyCalendarDays, app),
           const SizedBox(height: 16),
           _buildTaxBreakdown(l, yearTax, app),
+          const SizedBox(height: 16),
+          _buildYearWorkStats(l, yearEntries),
         ],
       ),
+    );
+  }
+
+  Widget _buildYearCompareView(AppState app, AppLocalizations l) {
+    final years = app.storage.getYearsWithEntries();
+    if (years.isEmpty) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.bar_chart_outlined, size: 64,
+                color: Theme.of(context).colorScheme.onSurface.withOpacity(0.2)),
+            const SizedBox(height: 12),
+            Text(l.get('no_data'),
+                style: TextStyle(color: Theme.of(context).colorScheme.onSurface.withOpacity(0.4))),
+          ],
+        ),
+      );
+    }
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(16),
+      child: _buildYearComparison(l, app),
     );
   }
 
@@ -436,7 +490,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
             ),
             const SizedBox(height: 8),
             Text(
-              TaxCalculator.formatCurrency(tax.netPay, app.country),
+              TaxCalculator.formatAmount(tax.netPay, app.country),
               style: const TextStyle(fontSize: 32, fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 12),
@@ -444,10 +498,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
               mainAxisAlignment: MainAxisAlignment.spaceEvenly,
               children: [
                 _miniStat(l.get('gross_pay'),
-                    TaxCalculator.formatCurrency(tax.grossPay, app.country),
+                    TaxCalculator.formatAmount(tax.grossPay, app.country),
                     const Color(0xFF00B8A9)),
                 _miniStat(l.get('total_tax'),
-                    '-${TaxCalculator.formatCurrency(tax.totalTax, app.country)}',
+                    '-${TaxCalculator.formatAmount(tax.totalTax, app.country)}',
                     Colors.redAccent),
               ],
             ),
@@ -496,7 +550,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       Text(item.key, style: TextStyle(fontSize: 13,
                           color: Theme.of(context).colorScheme.onSurface.withOpacity(0.7))),
                       Text(
-                        '-${TaxCalculator.formatCurrency(item.value, app.country)}',
+                        '-${TaxCalculator.formatAmount(item.value, app.country)}',
                         style: const TextStyle(fontSize: 13, color: Colors.redAccent),
                       ),
                     ],
@@ -509,7 +563,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 Text(l.get('total_tax'),
                     style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
                 Text(
-                  '-${TaxCalculator.formatCurrency(tax.totalTax, app.country)}',
+                  '-${TaxCalculator.formatAmount(tax.totalTax, app.country)}',
                   style: const TextStyle(
                       fontSize: 14, fontWeight: FontWeight.w600, color: Colors.redAccent),
                 ),
@@ -562,24 +616,95 @@ class _DashboardScreenState extends State<DashboardScreen> {
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Text(l.get('total_hours'),
+                Text('${l.get('total_hours')} · ${l.get('lump_sum_count')}',
                     style: const TextStyle(fontSize: 13)),
-                Text(totalHours.toStringAsFixed(1),
+                Text('${totalHours.toStringAsFixed(1)} · $lumpSumCount',
                     style: const TextStyle(fontWeight: FontWeight.w600)),
               ],
             ),
-            if (lumpSumCount > 0) ...[
+            if (holidayDays > 0) ...[
               const SizedBox(height: 8),
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Text(l.get('lump_sum_count'),
-                      style: const TextStyle(fontSize: 13)),
-                  Text('$lumpSumCount',
-                      style: const TextStyle(fontWeight: FontWeight.w600)),
+                  Text(l.get('holiday_work'), style: const TextStyle(fontSize: 13)),
+                  Text('$holidayDays',
+                      style: const TextStyle(fontWeight: FontWeight.w600, color: Colors.redAccent)),
                 ],
               ),
             ],
+            if (overtimeDays > 0) ...[
+              const SizedBox(height: 8),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(l.get('overtime'), style: const TextStyle(fontSize: 13)),
+                  Text('$overtimeDays',
+                      style: const TextStyle(fontWeight: FontWeight.w600, color: Colors.orangeAccent)),
+                ],
+              ),
+            ],
+            if (nightDays > 0) ...[
+              const SizedBox(height: 8),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  const Text('야간 Night', style: TextStyle(fontSize: 13)),
+                  Text('$nightDays',
+                      style: const TextStyle(fontWeight: FontWeight.w600, color: Colors.blueAccent)),
+                ],
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildYearWorkStats(AppLocalizations l, List<WorkEntry> entries) {
+    double totalHours = 0;
+    int lumpSumCount = 0;
+    int holidayDays = 0;
+    int overtimeDays = 0;
+    int nightDays = 0;
+    final workDaySet = <String>{};
+    for (final e in entries) {
+      workDaySet.add('${e.date.year}-${e.date.month}-${e.date.day}');
+      if (e.isLumpSum) {
+        lumpSumCount++;
+      } else {
+        totalHours += e.value;
+      }
+      if (e.isHoliday) holidayDays++;
+      if (e.isOvertime) overtimeDays++;
+      if (e.isNightShift) nightDays++;
+    }
+    final workDays = workDaySet.length;
+
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text(l.get('work_days'), style: const TextStyle(fontSize: 13)),
+                Text('$workDays',
+                    style: const TextStyle(fontWeight: FontWeight.w600)),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text('${l.get('total_hours')} · ${l.get('lump_sum_count')}',
+                    style: const TextStyle(fontSize: 13)),
+                Text('${totalHours.toStringAsFixed(1)} · $lumpSumCount',
+                    style: const TextStyle(fontWeight: FontWeight.w600)),
+              ],
+            ),
             if (holidayDays > 0) ...[
               const SizedBox(height: 8),
               Row(
@@ -692,6 +817,130 @@ class _DashboardScreenState extends State<DashboardScreen> {
                               ? const Color(0xFF00B8A9)
                               : Colors.grey.withOpacity(0.3),
                           width: 16,
+                          borderRadius: const BorderRadius.vertical(top: Radius.circular(4)),
+                        ),
+                      ],
+                    );
+                  }).toList(),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildYearComparison(AppLocalizations l, AppState app) {
+    final years = app.storage.getYearsWithEntries();
+    if (years.isEmpty) return const SizedBox.shrink();
+
+    final hourlyRate = app.storage.getHourlyRate(app.country);
+
+    final netByYear = <int, double>{};
+    final grossByYear = <int, double>{};
+    final hoursByYear = <int, double>{};
+    final workDaysByYear = <int, int>{};
+    final lumpSumByYear = <int, int>{};
+
+    for (final y in years) {
+      final entries = app.storage.getYearEntries(y);
+      final tax = _calcPerEntryTax(entries, hourlyRate);
+      netByYear[y] = tax.netPay;
+      grossByYear[y] = tax.grossPay;
+      double hours = 0;
+      int lump = 0;
+      final days = <String>{};
+      for (final e in entries) {
+        days.add('${e.date.year}-${e.date.month}-${e.date.day}');
+        if (e.isLumpSum) {
+          lump++;
+        } else {
+          hours += e.value;
+        }
+      }
+      hoursByYear[y] = hours;
+      workDaysByYear[y] = days.length;
+      lumpSumByYear[y] = lump;
+    }
+
+    final maxVal = netByYear.values.fold<double>(0, (a, b) => a > b ? a : b);
+
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(l.get('year_comparison'),
+                style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
+            const SizedBox(height: 16),
+            SizedBox(
+              height: 220,
+              child: BarChart(
+                BarChartData(
+                  alignment: BarChartAlignment.spaceAround,
+                  maxY: maxVal * 1.25,
+                  barTouchData: BarTouchData(
+                    touchTooltipData: BarTouchTooltipData(
+                      tooltipRoundedRadius: 10,
+                      fitInsideHorizontally: true,
+                      fitInsideVertically: true,
+                      getTooltipItem: (group, groupIndex, rod, rodIndex) {
+                        final year = group.x;
+                        final net = netByYear[year] ?? 0;
+                        final gross = grossByYear[year] ?? 0;
+                        final hours = hoursByYear[year] ?? 0;
+                        final days = workDaysByYear[year] ?? 0;
+                        final lump = lumpSumByYear[year] ?? 0;
+                        final lines = <String>[
+                          '$year',
+                          '${l.get('net_income')}: ${TaxCalculator.formatAmount(net, app.country)}',
+                          '${l.get('gross_income')}: ${TaxCalculator.formatAmount(gross, app.country)}',
+                          '${l.get('total_hours')}: ${hours.toStringAsFixed(1)}',
+                          '${l.get('work_days')}: $days',
+                          if (lump > 0)
+                            '${l.get('lump_sum_count')}: $lump',
+                        ];
+                        return BarTooltipItem(
+                          lines.join('\n'),
+                          const TextStyle(fontSize: 11, color: Colors.white, height: 1.4),
+                        );
+                      },
+                    ),
+                  ),
+                  titlesData: FlTitlesData(
+                    bottomTitles: AxisTitles(
+                      sideTitles: SideTitles(
+                        showTitles: true,
+                        reservedSize: 28,
+                        getTitlesWidget: (value, meta) => Padding(
+                          padding: const EdgeInsets.only(top: 6),
+                          child: Text(
+                            '${value.toInt()}',
+                            style: const TextStyle(fontSize: 10),
+                          ),
+                        ),
+                      ),
+                    ),
+                    leftTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                    topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                    rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                  ),
+                  gridData: const FlGridData(show: false),
+                  borderData: FlBorderData(show: false),
+                  barGroups: years.map((y) {
+                    final net = netByYear[y] ?? 0;
+                    final isSelected = y == _selectedYear;
+                    return BarChartGroupData(
+                      x: y,
+                      barRods: [
+                        BarChartRodData(
+                          toY: net,
+                          color: isSelected
+                              ? const Color(0xFF00B8A9)
+                              : const Color(0xFF00B8A9).withOpacity(0.4),
+                          width: 22,
                           borderRadius: const BorderRadius.vertical(top: Radius.circular(4)),
                         ),
                       ],

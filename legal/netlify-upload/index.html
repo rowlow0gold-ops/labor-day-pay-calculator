@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Privacy Policy — Labor Day Pay</title>
+<style>
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    max-width: 720px;
+    margin: 40px auto;
+    padding: 0 20px;
+    color: #1a1a2e;
+    line-height: 1.6;
+  }
+  h1 { border-bottom: 2px solid #00897B; padding-bottom: 8px; }
+  h2 { color: #00897B; margin-top: 32px; }
+  h3 { margin-top: 20px; }
+  code { background: #f4f4f7; padding: 2px 6px; border-radius: 4px; font-size: 0.9em; }
+  .meta { color: #666; font-size: 0.9em; }
+  .summary { background: #e0f2f1; padding: 16px 20px; border-radius: 8px; border-left: 4px solid #00897B; }
+  a { color: #00897B; }
+</style>
+</head>
+<body>
+
+<h1>Privacy Policy</h1>
+<p class="meta">
+  <strong>App:</strong> Labor Day Pay (<code>com.jj.labordaypay</code>)<br>
+  <strong>Effective date:</strong> April 14, 2026<br>
+  <strong>Contact:</strong> <a href="mailto:rowlow302606@gmail.com">rowlow302606@gmail.com</a>
+</p>
+
+<div class="summary">
+  <strong>Short version:</strong> Labor Day Pay is a pay calculator. You can use it without signing in. If you choose to sign in with Google, your work records are backed up to your private Google Firebase storage. We don't sell, share, or use your data for advertising. We don't track your location.
+</div>
+
+<h2>1. Information We Collect</h2>
+
+<h3>1.1 When you sign in (optional)</h3>
+<p>Sign-in is optional. If you sign in with Google, we receive from Google:</p>
+<ul>
+  <li>Your Google account email address</li>
+  <li>Your display name</li>
+  <li>Your profile image URL</li>
+  <li>A Firebase Authentication user ID</li>
+</ul>
+<p>We use this information to identify your account and sync your data across devices.</p>
+
+<h3>1.2 Work records you create</h3>
+<p>If you're signed in, the work records you create inside the app are stored in Google Cloud Firestore under your account. These may include:</p>
+<ul>
+  <li>Work dates and hours</li>
+  <li>Income amounts and calculations you enter</li>
+  <li>Country and tax settings you select</li>
+  <li>App preferences</li>
+</ul>
+<p>If you're not signed in, these records stay only on your device.</p>
+
+<h3>1.3 Device region (read on-device only)</h3>
+<p>The app reads your device's language and regional setting (e.g. <code>en-US</code>, <code>ja-JP</code>) once at launch so it can show the right default currency, tax rules, and public holidays. This reading stays on your device — we do not transmit, store, or log your language or region anywhere.</p>
+
+<h3>1.4 What we do NOT collect</h3>
+<ul>
+  <li>Your device's precise or approximate GPS location</li>
+  <li>Your contacts, photos, files, or messages</li>
+  <li>Advertising IDs</li>
+  <li>Analytics about how you use the app beyond what Firebase requires to authenticate you</li>
+  <li>Any payment or financial account information</li>
+</ul>
+
+<h2>2. How We Use Information</h2>
+<ul>
+  <li>To operate the app's core features</li>
+  <li>To sync your work records across your devices when you're signed in</li>
+  <li>To protect against abuse (e.g., Firebase authentication security logs)</li>
+</ul>
+<p>We do <strong>not</strong> use your information for advertising, profiling, or sale to third parties.</p>
+
+<h2>3. Third-Party Services</h2>
+<p>The app uses the following external services, each governed by its own privacy policy:</p>
+<ul>
+  <li><strong>Firebase Authentication</strong> (Google) — for optional sign-in</li>
+  <li><strong>Firebase Firestore</strong> (Google) — for cloud sync of your records when signed in</li>
+  <li><strong>Google Sign-In</strong> (Google) — for sign-in via your Google account</li>
+  <li><strong>Nager.Date public holiday API</strong> (<code>date.nager.at</code>) — to fetch public holidays for countries we don't ship hardcoded. The app sends only a two-letter country code (e.g. <code>DE</code>, <code>BR</code>) and a four-digit year. No account information, device identifiers, or personal data is sent. Results are cached locally so the lookup happens at most once per country per 30 days. See <a href="https://date.nager.at/" target="_blank" rel="noopener">Nager.Date</a> for details.</li>
+</ul>
+<p>See <a href="https://policies.google.com/privacy" target="_blank" rel="noopener">Google's Privacy Policy</a> for how Google handles data.</p>
+<p>We do not use advertising networks, social SDKs, or third-party analytics services.</p>
+
+<h2>4. Data Retention</h2>
+<ul>
+  <li>Your cloud-synced records stay in Firebase until you delete them or delete your account.</li>
+  <li>Local records on your device are deleted when you uninstall the app.</li>
+  <li>To delete your account and all associated cloud data, use the in-app account deletion option, or email us at the address above.</li>
+</ul>
+
+<h2>5. Your Rights</h2>
+<p>You can:</p>
+<ul>
+  <li>Access, correct, or delete your data from within the app at any time.</li>
+  <li>Request a copy or full deletion of your data by emailing us.</li>
+  <li>Stop using the app and uninstall it; this removes local data.</li>
+</ul>
+<p>Depending on where you live (e.g., EU, UK, California), you may have additional rights under GDPR, UK GDPR, or CCPA, including the right to object to processing or request data portability. Email us to exercise any of these rights.</p>
+
+<h2>6. Children</h2>
+<p>This app is intended for a general audience age 13 and older. It is not directed at children under 13. If you believe we've inadvertently collected data from a child under 13, please email us and we'll delete it.</p>
+
+<h2>7. Security</h2>
+<ul>
+  <li>All data in transit between your device and our backend is encrypted over HTTPS/TLS.</li>
+  <li>Data at rest is encrypted by Google Firebase.</li>
+  <li>Sensitive on-device data is stored using Flutter Secure Storage (iOS Keychain / Android EncryptedSharedPreferences).</li>
+  <li>Biometric login, if enabled, is handled by your device's operating system and we never see your biometric data.</li>
+</ul>
+<p>No method of transmission or storage is 100% secure; we take reasonable measures to protect your data but cannot guarantee absolute security.</p>
+
+<h2>8. International Data Transfers</h2>
+<p>Firebase servers may be located in countries different from yours, including the United States. By using the app, you consent to your data being processed in those countries in line with this policy and Google's data handling practices.</p>
+
+<h2>9. Changes to This Policy</h2>
+<p>We may update this policy from time to time. Material changes will be noted by updating the "Effective date" above. Continued use of the app after changes means you accept the updated policy.</p>
+
+<h2>10. Contact</h2>
+<p>Questions or requests about this policy? Email: <a href="mailto:rowlow302606@gmail.com">rowlow302606@gmail.com</a></p>
+
+</body>
+</html>

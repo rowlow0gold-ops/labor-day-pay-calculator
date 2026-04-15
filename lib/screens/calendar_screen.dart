@@ -23,6 +23,11 @@ class _CalendarScreenState extends State<CalendarScreen> {
   Map<String, List<WorkEntry>> _entries = {};
   double _hourlyRate = 0;
 
+  /// Remembers what the user last entered so the next fresh cell prefills
+  /// with those values instead of the hardcoded app defaults. Session-only
+  /// (cleared on app restart) — first run of the app still shows defaults.
+  _EntryDraft? _lastEnteredDraft;
+
   // Range selection mode
   bool _isSelectMode = false;
   DateTime? _rangeStart;
@@ -157,8 +162,15 @@ class _CalendarScreenState extends State<CalendarScreen> {
 
   List<Holiday> _getHolidays() {
     final app = context.read<AppState>();
-    final config = countryConfigs[app.country]!;
-    return _focusedDay.year == 2025 ? config.holidays2025 : config.holidays2026;
+    // Holiday service handles 3-tier resolution:
+    //   hardcoded (KR/JP/US/AU/CA, 2025-2026)
+    //   → local cache (any ISO / any year, populated from past API fetches)
+    //   → empty (until next online refresh)
+    //
+    // app.holidayIso uses the device's actual region code when it isn't
+    // one of the 5 hardcoded countries — so a user in Germany sees German
+    // holidays even though tax/currency defaults stay on their last pick.
+    return app.holidays.getHolidays(app.holidayIso, _focusedDay.year);
   }
 
   bool _isHoliday(DateTime day) {
@@ -349,7 +361,10 @@ class _CalendarScreenState extends State<CalendarScreen> {
                 // Available height minus header(~52) minus dow row(~32) minus padding(~4)
                 final availableHeight = constraints.maxHeight - 96;
                 // Always assume 6 rows (max possible)
-                final rowHeight = (availableHeight / 6).floorToDouble().clamp(48, 120).toDouble();
+                // Up to 3 entries × 4 lines each + day number = ~13 lines.
+                // Give the row as much space as the screen allows up to 200px
+                // so all 12 content lines can fit when the day is full.
+                final rowHeight = (availableHeight / 6).floorToDouble().clamp(48, 200).toDouble();
 
                 return TableCalendar(
                   firstDay: DateTime(2024, 1, 1),
@@ -579,14 +594,112 @@ class _CalendarScreenState extends State<CalendarScreen> {
     if (_rangeStart == null || _rangeEnd == null) return [];
     final start = _rangeStart!.isBefore(_rangeEnd!) ? _rangeStart! : _rangeEnd!;
     final end = _rangeStart!.isBefore(_rangeEnd!) ? _rangeEnd! : _rangeStart!;
-    final entries = <WorkEntry>[];
+    final app = context.read<AppState>();
+
+    // Collect entries from storage (not _entries which only has current month).
+    // Build a set of months we need to load.
+    final months = <String>{};
     var d = start;
     while (!d.isAfter(end)) {
+      months.add('${d.year}_${d.month}');
+      d = d.add(const Duration(days: 1));
+    }
+
+    // Load entries from storage for each required month.
+    final allEntries = <String, List<WorkEntry>>{};
+    for (final m in months) {
+      final parts = m.split('_');
+      final year = int.parse(parts[0]);
+      final month = int.parse(parts[1]);
+      for (final e in app.storage.getWorkEntries(year, month)) {
+        allEntries.putIfAbsent(_dateKey(e.date), () => []).add(e);
+      }
+    }
+
+    // Pick entries within the selected range.
+    final entries = <WorkEntry>[];
+    d = start;
+    while (!d.isAfter(end)) {
       final key = _dateKey(d);
-      if (_entries.containsKey(key)) entries.addAll(_entries[key]!);
+      if (allEntries.containsKey(key)) entries.addAll(allEntries[key]!);
       d = d.add(const Duration(days: 1));
     }
     return entries;
+  }
+
+  /// Renders one work entry inside a calendar cell as four stacked rows:
+  /// money, hours (or money icon for bare lump sum), workplace, memo.
+  /// Any optional row (workplace / memo) is omitted when empty.
+  Widget _buildEntryMicroCard(WorkEntry e, Color? valueColor) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 2),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          // Row 1: money
+          Text(
+            _formatMoney(_entryPay(e)),
+            style: TextStyle(
+              fontSize: 9.5,
+              height: 1.15,
+              color: valueColor,
+              fontWeight: FontWeight.bold,
+            ),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            textAlign: TextAlign.center,
+          ),
+          // Row 2: hours (or money icon for bare lump sum)
+          if (e.isLumpSum && e.lumpSumHours <= 0)
+            Icon(
+              Icons.payments_outlined,
+              size: 10,
+              color: Theme.of(context).colorScheme.onSurface.withOpacity(0.55),
+            )
+          else
+            Text(
+              '${_fmtNumInput(e.isLumpSum ? e.lumpSumHours : e.value)}h',
+              style: TextStyle(
+                fontSize: 8.5,
+                height: 1.15,
+                color: Theme.of(context).colorScheme.onSurface.withOpacity(0.7),
+                fontWeight: FontWeight.w500,
+              ),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              textAlign: TextAlign.center,
+            ),
+          // Row 3: workplace (only if set)
+          if (e.workplace.isNotEmpty)
+            Text(
+              e.workplace,
+              style: const TextStyle(
+                fontSize: 8.5,
+                height: 1.15,
+                color: Color(0xFF00B8A9),
+              ),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              textAlign: TextAlign.center,
+            ),
+          // Row 4: memo (only if set)
+          if (e.memo.isNotEmpty)
+            Text(
+              e.memo,
+              style: TextStyle(
+                fontSize: 8.5,
+                height: 1.15,
+                color: Theme.of(context).colorScheme.onSurface.withOpacity(0.6),
+                fontStyle: FontStyle.italic,
+              ),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              textAlign: TextAlign.center,
+            ),
+        ],
+      ),
+    );
   }
 
   Widget _buildDayCell(DateTime day, bool isSelected, bool isToday) {
@@ -648,57 +761,49 @@ class _CalendarScreenState extends State<CalendarScreen> {
               fontWeight: isToday ? FontWeight.bold : FontWeight.normal,
             ),
           ),
-          if (hasEntries) ...[
-            // One row per entry — pay amount + workplace on the same line.
-            for (final e in dayEntries)
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 2),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
+          // Everything below the day number lives inside a clipped, scroll-
+          // free box — so multiple entries with memos can "overflow" past
+          // the cell bottom silently instead of triggering a RenderFlex
+          // overflow error with yellow/black stripes.
+          Expanded(
+            child: ClipRect(
+              child: SingleChildScrollView(
+                // Only scrolls when entries overflow the cell — otherwise it's
+                // a no-op. Clamping physics avoids the iOS bounce inside a
+                // tiny cell, which would feel jittery.
+                physics: const ClampingScrollPhysics(),
+                child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Flexible(
-                      child: Text(
-                        _formatMoney(_entryPay(e)),
-                        style: TextStyle(
-                          fontSize: 10,
-                          color: valueColor,
-                          fontWeight: FontWeight.bold,
-                        ),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                    if (e.workplace.isNotEmpty) ...[
-                      const SizedBox(width: 3),
-                      Flexible(
+                    if (hasEntries)
+                      for (int __i = 0; __i < dayEntries.length; __i++) ...[
+                        if (__i > 0)
+                          // Thin divider so stacked entries stay visually separated.
+                          Container(
+                            margin: const EdgeInsets.symmetric(vertical: 2, horizontal: 6),
+                            height: 0.5,
+                            color: Theme.of(context).colorScheme.onSurface.withOpacity(0.15),
+                          ),
+                        _buildEntryMicroCard(dayEntries[__i], valueColor),
+                      ]
+                    else if (holidayName != null)
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 2),
                         child: Text(
-                          e.workplace,
-                          style: const TextStyle(
-                            fontSize: 8,
-                            color: Color(0xFF00B8A9),
+                          holidayName,
+                          style: TextStyle(
+                            fontSize: 7,
+                            color: Colors.redAccent.withOpacity(0.7),
                           ),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                         ),
                       ),
-                    ],
                   ],
                 ),
               ),
-          ] else if (holidayName != null)
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 2),
-              child: Text(
-                holidayName,
-                style: TextStyle(
-                  fontSize: 7,
-                  color: Colors.redAccent.withOpacity(0.7),
-                ),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-              ),
             ),
+          ),
         ],
       ),
       ),
@@ -721,7 +826,13 @@ class _CalendarScreenState extends State<CalendarScreen> {
         return;
       }
 
-      // Second tap (no range yet) → set range end
+      // Tap same cell again → confirm single-cell selection
+      if (_rangeEnd == null && _dateKey(day) == _dateKey(_rangeStart!)) {
+        _rangeEnd = _rangeStart;
+        return;
+      }
+
+      // Second tap (different cell, no range end) → set range end
       if (_rangeEnd == null) {
         _rangeEnd = day;
         return;
@@ -761,14 +872,26 @@ class _CalendarScreenState extends State<CalendarScreen> {
     final start = _rangeStart!.isBefore(_rangeEnd!) ? _rangeStart! : _rangeEnd!;
 
     // Check if any target cells already have data (count unique days, not entries)
+    // across ALL target months — not just the currently focused one.
     final seenTargetKeys = <String>{};
     int overlapCount = 0;
+    // Pre-load every target month from storage so we can detect overlaps cross-month.
+    final monthsCache = <String, Set<String>>{};
     for (final src in rangeEntries) {
       final offset = src.date.difference(start).inDays;
       final targetDate = day.add(Duration(days: offset));
-      if (targetDate.month != _focusedDay.month || targetDate.year != _focusedDay.year) continue;
       final key = _dateKey(targetDate);
-      if (seenTargetKeys.add(key) && _entries.containsKey(key)) overlapCount++;
+      if (!seenTargetKeys.add(key)) continue;
+      final mKey = '${targetDate.year}_${targetDate.month}';
+      var keysInMonth = monthsCache[mKey];
+      if (keysInMonth == null) {
+        keysInMonth = {
+          for (final e in app.storage.getWorkEntries(targetDate.year, targetDate.month))
+            _dateKey(e.date),
+        };
+        monthsCache[mKey] = keysInMonth;
+      }
+      if (keysInMonth.contains(key)) overlapCount++;
     }
 
     if (overlapCount > 0) {
@@ -806,6 +929,8 @@ class _CalendarScreenState extends State<CalendarScreen> {
   }
 
   void _doPaste(DateTime day, DateTime start, List<WorkEntry> rangeEntries, AppLocalizations l) {
+    final app = context.read<AppState>();
+
     // Group source entries by the day-offset from the range start, so we can
     // paste all entries for a given source day as a list onto the target day.
     final grouped = <int, List<WorkEntry>>{};
@@ -814,11 +939,16 @@ class _CalendarScreenState extends State<CalendarScreen> {
       grouped.putIfAbsent(offset, () => []).add(src);
     }
 
+    // Bucket the new entries by year-month so each month can be persisted in
+    // one storage write. This lets the paste span multiple months correctly.
+    final perMonth = <String, _MonthBucket>{};
     int copied = 0;
+
     grouped.forEach((offset, sources) {
       final targetDate = day.add(Duration(days: offset));
-      if (targetDate.month != _focusedDay.month || targetDate.year != _focusedDay.year) return;
-      final key = _dateKey(targetDate);
+      final mKey = '${targetDate.year}_${targetDate.month}';
+      final bucket = perMonth.putIfAbsent(mKey, () => _MonthBucket(targetDate.year, targetDate.month));
+
       final newEntries = sources
           .map((src) => WorkEntry(
                 date: targetDate,
@@ -831,12 +961,34 @@ class _CalendarScreenState extends State<CalendarScreen> {
                 workplace: src.workplace,
                 taxRate: src.taxRate,
                 insuranceRate: src.insuranceRate,
+                incentivePercent: src.incentivePercent,
+                incentiveEffectHours: src.incentiveEffectHours,
+                memo: src.memo,
+                lumpSumHours: src.lumpSumHours,
               ))
           .toList();
-      _entries[key] = newEntries;
+      bucket.replacements[_dateKey(targetDate)] = newEntries;
       copied += newEntries.length;
     });
-    _saveEntries();
+
+    // For each affected month: load existing entries, replace the days we're
+    // overwriting, keep all other days untouched, write the merged list back.
+    for (final bucket in perMonth.values) {
+      final existing = app.storage.getWorkEntries(bucket.year, bucket.month);
+      final merged = <WorkEntry>[];
+      for (final e in existing) {
+        if (bucket.replacements.containsKey(_dateKey(e.date))) continue; // dropped — overwriting this day
+        merged.add(e);
+      }
+      for (final list in bucket.replacements.values) {
+        merged.addAll(list);
+      }
+      app.storage.setWorkEntries(bucket.year, bucket.month, merged);
+    }
+
+    // Refresh the in-memory map for whichever month is currently visible.
+    _loadData();
+    app.refreshRates();
 
     setState(() {
       _isSelectMode = false;
@@ -1043,6 +1195,7 @@ class _CalendarScreenState extends State<CalendarScreen> {
   }
 
   void _showMonthYearJumper() {
+    final l = AppLocalizations.of(context);
     showDialog(
       context: context,
       builder: (ctx) {
@@ -1051,7 +1204,7 @@ class _CalendarScreenState extends State<CalendarScreen> {
         return StatefulBuilder(
           builder: (ctx, setDialogState) {
             return AlertDialog(
-              title: const Text('Select Month'),
+              title: Text(l.get('select_month')),
               content: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
@@ -1062,9 +1215,82 @@ class _CalendarScreenState extends State<CalendarScreen> {
                         icon: const Icon(Icons.chevron_left),
                         onPressed: () => setDialogState(() => tempYear--),
                       ),
-                      Text(
-                        '$tempYear',
-                        style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+                      GestureDetector(
+                        onTap: () async {
+                          final currentYear = DateTime.now().year;
+                          // Always start from 2026, extend to currentYear + 4
+                          const baseYear = 2026;
+                          final endYear = currentYear + 4;
+                          final yearCount = endYear - baseYear + 1;
+                          final picked = await showDialog<int>(
+                            context: ctx,
+                            builder: (yCtx) {
+                              return AlertDialog(
+                                title: Text(l.get('select_year')),
+                                content: SizedBox(
+                                  width: 280,
+                                  height: yearCount <= 6 ? 120 : yearCount <= 9 ? 200 : 260,
+                                  child: GridView.count(
+                                    crossAxisCount: 3,
+                                    mainAxisSpacing: 8,
+                                    crossAxisSpacing: 8,
+                                    childAspectRatio: 1.6,
+                                    children: List.generate(yearCount, (i) {
+                                      final y = baseYear + i;
+                                      final isSel = y == tempYear;
+                                      return Material(
+                                        color: isSel
+                                            ? const Color(0xFF00B8A9)
+                                            : const Color(0xFF00B8A9).withOpacity(0.1),
+                                        borderRadius: BorderRadius.circular(8),
+                                        child: InkWell(
+                                          borderRadius: BorderRadius.circular(8),
+                                          onTap: () => Navigator.pop(yCtx, y),
+                                          child: Center(
+                                            child: Text(
+                                              '$y',
+                                              style: TextStyle(
+                                                fontSize: 15,
+                                                fontWeight: FontWeight.w600,
+                                                color: isSel
+                                                    ? Colors.white
+                                                    : const Color(0xFF00B8A9),
+                                              ),
+                                            ),
+                                          ),
+                                        ),
+                                      );
+                                    }),
+                                  ),
+                                ),
+                              );
+                            },
+                          );
+                          if (picked != null) {
+                            setDialogState(() => tempYear = picked);
+                          }
+                        },
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(
+                              color: const Color(0xFF00B8A9).withOpacity(0.3),
+                            ),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text(
+                                '$tempYear',
+                                style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+                              ),
+                              const SizedBox(width: 4),
+                              Icon(Icons.arrow_drop_down,
+                                  size: 20, color: const Color(0xFF00B8A9)),
+                            ],
+                          ),
+                        ),
                       ),
                       IconButton(
                         icon: const Icon(Icons.chevron_right),
@@ -1114,7 +1340,7 @@ class _CalendarScreenState extends State<CalendarScreen> {
               actions: [
                 TextButton(
                   onPressed: () => Navigator.pop(ctx),
-                  child: const Text('Cancel'),
+                  child: Text(l.get('cancel')),
                 ),
                 FilledButton(
                   onPressed: () {
@@ -1124,7 +1350,7 @@ class _CalendarScreenState extends State<CalendarScreen> {
                     _loadData();
                     Navigator.pop(ctx);
                   },
-                  child: const Text('OK'),
+                  child: Text(l.get('confirm')),
                 ),
               ],
             );
@@ -1142,9 +1368,14 @@ class _CalendarScreenState extends State<CalendarScreen> {
     final holidayName = _getHolidayName(day);
 
     // Build mutable draft list from existing entries, or start with one blank.
+    // For a fresh cell we prefer the user's *last-entered* values (sticky
+    // defaults) so they don't have to retype the same rate/workplace/hours
+    // every time. On the very first cell open we fall back to app defaults.
     final drafts = <_EntryDraft>[];
     if (existing.isEmpty) {
-      drafts.add(_EntryDraft.newDefault(app, _hourlyRate));
+      drafts.add(_lastEnteredDraft != null
+          ? _EntryDraft.copyFrom(_lastEnteredDraft!)
+          : _EntryDraft.newDefault(app, _hourlyRate));
     } else {
       for (final e in existing) {
         drafts.add(_EntryDraft.fromEntry(e));
@@ -1162,6 +1393,10 @@ class _CalendarScreenState extends State<CalendarScreen> {
     final insuranceRateController = TextEditingController();
     final incentiveController = TextEditingController();
     final incentiveHoursController = TextEditingController();
+    final memoController = TextEditingController();
+    // Lump-sum (일시금) mode only — optional hours-worked field. Empty string
+    // means "not entered" and the calendar cell falls back to the money icon.
+    final lumpSumHoursController = TextEditingController();
     String? incentiveHoursError;
 
     void loadDraftToControllers(_EntryDraft d) {
@@ -1173,13 +1408,21 @@ class _CalendarScreenState extends State<CalendarScreen> {
       insuranceRateController.text = _fmtNumInput(d.insuranceRate);
       incentiveController.text = _fmtNumInput(d.incentivePercent);
       incentiveHoursController.text = _fmtNumInput(d.incentiveEffectHours);
+      memoController.text = d.memo;
+      // Show empty string (not "0") when lump-sum hours haven't been entered
+      // so the placeholder stays visible.
+      lumpSumHoursController.text =
+          d.lumpSumHours > 0 ? _fmtNumInput(d.lumpSumHours) : '';
       incentiveHoursError = null;
     }
 
     void flushControllersToDraft(_EntryDraft d) {
       d.workplace = workplaceController.text;
+      d.memo = memoController.text;
       if (d.isLumpSum) {
         d.value = double.tryParse(paymentController.text) ?? d.value;
+        d.lumpSumHours =
+            double.tryParse(lumpSumHoursController.text) ?? 0;
       } else {
         d.value = double.tryParse(hoursController.text) ?? d.value;
         d.rate = double.tryParse(rateController.text) ?? d.rate;
@@ -1218,12 +1461,20 @@ class _CalendarScreenState extends State<CalendarScreen> {
               if (drafts.length >= _maxEntriesPerDay) return;
               flushControllersToDraft(drafts[selectedIndex]);
               setDialogState(() {
-                // New drafts inherit the current tab's mode for consistency.
-                drafts.add(_EntryDraft.newDefault(
-                  app,
-                  _hourlyRate,
-                  isLumpSum: current.isLumpSum,
-                ));
+                // New drafts inherit the current tab's mode + sticky defaults
+                // (last-entered values) for consistency across repeated edits.
+                final _EntryDraft seed;
+                if (_lastEnteredDraft != null) {
+                  seed = _EntryDraft.copyFrom(_lastEnteredDraft!);
+                  seed.isLumpSum = current.isLumpSum;
+                } else {
+                  seed = _EntryDraft.newDefault(
+                    app,
+                    _hourlyRate,
+                    isLumpSum: current.isLumpSum,
+                  );
+                }
+                drafts.add(seed);
                 selectedIndex = drafts.length - 1;
                 loadDraftToControllers(drafts[selectedIndex]);
               });
@@ -1250,7 +1501,7 @@ class _CalendarScreenState extends State<CalendarScreen> {
             }
 
             return AlertDialog(
-              insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
+              insetPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 24),
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
               title: Row(
                 children: [
@@ -1277,10 +1528,12 @@ class _CalendarScreenState extends State<CalendarScreen> {
                   ],
                 ],
               ),
-              content: SingleChildScrollView(
+              content: SizedBox(
+                width: double.maxFinite,
+                child: SingleChildScrollView(
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
                     // Entry tab row — one chip per draft + "add" button
                     SizedBox(
@@ -1372,7 +1625,7 @@ class _CalendarScreenState extends State<CalendarScreen> {
                     const SizedBox(height: 12),
 
                     if (current.isLumpSum) ...[
-                      // 일시금 mode: payment + workplace (mirrors hourly layout)
+                      // 일시금 mode: payment + workplace + memo (mirrors hourly layout)
                       Text(
                         l.get('rate_setting'),
                         style: const TextStyle(
@@ -1386,7 +1639,6 @@ class _CalendarScreenState extends State<CalendarScreen> {
                         controller: paymentController,
                         keyboardType: const TextInputType.numberWithOptions(decimal: true),
                         inputFormatters: _numberInputFormatters,
-                        autofocus: true,
                         decoration: InputDecoration(
                           labelText: l.get('payment'),
                           border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
@@ -1398,13 +1650,53 @@ class _CalendarScreenState extends State<CalendarScreen> {
                         },
                       ),
                       const SizedBox(height: 12),
+                      // Optional hours — if set, we show "Xh" on the calendar
+                      // cell instead of the money icon. Useful when a lump
+                      // sum job still has a tracked duration.
+                      TextField(
+                        controller: lumpSumHoursController,
+                        keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                        inputFormatters: _hoursFormatters,
+                        decoration: InputDecoration(
+                          labelText: l.get('hours_optional'),
+                          floatingLabelBehavior: FloatingLabelBehavior.always,
+                          prefixIcon: const Icon(Icons.schedule, size: 18),
+                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                          contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                        ),
+                        onChanged: (v) {
+                          current.lumpSumHours = double.tryParse(v) ?? 0;
+                        },
+                      ),
+                      const SizedBox(height: 12),
                       // Workplace — same styling as hourly mode
                       TextField(
                         controller: workplaceController,
+                        keyboardType: TextInputType.text,
                         decoration: InputDecoration(
                           labelText: l.get('workplace'),
                           floatingLabelBehavior: FloatingLabelBehavior.always,
                           prefixIcon: const Icon(Icons.business, size: 18),
+                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                          contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      // Memo — freeform notes for this lump sum entry
+                      TextField(
+                        controller: memoController,
+                        keyboardType: TextInputType.multiline,
+                        maxLines: 3,
+                        minLines: 2,
+                        textCapitalization: TextCapitalization.sentences,
+                        decoration: InputDecoration(
+                          labelText: l.get('memo'),
+                          floatingLabelBehavior: FloatingLabelBehavior.always,
+                          alignLabelWithHint: true,
+                          prefixIcon: const Padding(
+                            padding: EdgeInsets.only(bottom: 40),
+                            child: Icon(Icons.notes, size: 18),
+                          ),
                           border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
                           contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
                         ),
@@ -1515,10 +1807,31 @@ class _CalendarScreenState extends State<CalendarScreen> {
                       // Row 3: workplace (full width)
                       TextField(
                         controller: workplaceController,
+                        keyboardType: TextInputType.text,
                         decoration: InputDecoration(
                           labelText: l.get('workplace'),
                           floatingLabelBehavior: FloatingLabelBehavior.always,
                           prefixIcon: const Icon(Icons.business, size: 18),
+                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                          contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      // Row 4: memo (full width, multiline)
+                      TextField(
+                        controller: memoController,
+                        keyboardType: TextInputType.multiline,
+                        maxLines: 3,
+                        minLines: 2,
+                        textCapitalization: TextCapitalization.sentences,
+                        decoration: InputDecoration(
+                          labelText: l.get('memo'),
+                          floatingLabelBehavior: FloatingLabelBehavior.always,
+                          alignLabelWithHint: true,
+                          prefixIcon: const Padding(
+                            padding: EdgeInsets.only(bottom: 40),
+                            child: Icon(Icons.notes, size: 18),
+                          ),
                           border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
                           contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
                         ),
@@ -1606,6 +1919,7 @@ class _CalendarScreenState extends State<CalendarScreen> {
                   ],
                 ),
               ),
+              ),
               actions: [
                 Row(
                   children: [
@@ -1628,6 +1942,10 @@ class _CalendarScreenState extends State<CalendarScreen> {
                           ? null
                           : () {
                               flushControllersToDraft(drafts[selectedIndex]);
+                              // Remember the currently-selected draft as the
+                              // sticky default for the next fresh cell open.
+                              _lastEnteredDraft =
+                                  _EntryDraft.copyFrom(drafts[selectedIndex]);
                               final newList = drafts
                                   .map((d) => WorkEntry(
                                         date: day,
@@ -1642,6 +1960,8 @@ class _CalendarScreenState extends State<CalendarScreen> {
                                         insuranceRate: d.insuranceRate,
                                         incentivePercent: d.isLumpSum ? 0 : d.incentivePercent,
                                         incentiveEffectHours: d.isLumpSum ? 0 : d.incentiveEffectHours,
+                                        memo: d.memo,
+                                        lumpSumHours: d.isLumpSum ? d.lumpSumHours : 0,
                                       ))
                                   .toList();
                               setState(() => _entries[key] = newList);
@@ -1700,6 +2020,9 @@ class _CalendarScreenState extends State<CalendarScreen> {
     final origWorkplaceDaily = app.storage.getDefaultWorkplaceDaily();
     final origLumpSum = app.storage.getDefaultLumpSum();
     final origDefaultPayment = app.storage.getDefaultPayment();
+    final origDefaultLumpSumHours = app.storage.getDefaultLumpSumHours();
+    final origDefaultMemoDaily = app.storage.getDefaultMemoDaily();
+    final origDefaultMemoHourly = app.storage.getDefaultMemoHourly();
     final origTaxRateHourly = app.taxRateHourly;
     final origInsuranceRateHourly = app.insuranceRateHourly;
     final origTaxRateDaily = app.taxRateDaily;
@@ -1714,6 +2037,9 @@ class _CalendarScreenState extends State<CalendarScreen> {
     String tempWorkplaceDaily = origWorkplaceDaily;
     bool tempLumpSum = origLumpSum;
     double tempDefaultPayment = origDefaultPayment;
+    double tempDefaultLumpSumHours = origDefaultLumpSumHours;
+    String tempDefaultMemoDaily = origDefaultMemoDaily;
+    String tempDefaultMemoHourly = origDefaultMemoHourly;
     double tempTaxRateHourly = origTaxRateHourly;
     double tempInsuranceRateHourly = origInsuranceRateHourly;
     double tempTaxRateDaily = origTaxRateDaily;
@@ -1725,6 +2051,11 @@ class _CalendarScreenState extends State<CalendarScreen> {
     final hourlyController = TextEditingController(text: _fmtNumInput(origHourlyRate));
     final defaultHoursController = TextEditingController(text: _fmtNumInput(origDefaultHours));
     final defaultPaymentController = TextEditingController(text: _fmtNumInput(origDefaultPayment));
+    final defaultLumpSumHoursController = TextEditingController(
+      text: origDefaultLumpSumHours > 0 ? _fmtNumInput(origDefaultLumpSumHours) : '',
+    );
+    final defaultMemoDailyController = TextEditingController(text: origDefaultMemoDaily);
+    final defaultMemoHourlyController = TextEditingController(text: origDefaultMemoHourly);
     final workplaceHourlyController = TextEditingController(text: origWorkplaceHourly);
     final workplaceDailyController = TextEditingController(text: origWorkplaceDaily);
     final settingsTaxHourlyController = TextEditingController(text: _fmtNumInput(origTaxRateHourly));
@@ -1734,30 +2065,20 @@ class _CalendarScreenState extends State<CalendarScreen> {
     final incentiveHourlyController = TextEditingController(text: _fmtNumInput(origIncentiveHourly));
     final incentiveEffectHoursController = TextEditingController(text: _fmtNumInput(origIncentiveEffectHours));
 
-    showModalBottomSheet(
+    showDialog(
       context: context,
-      isScrollControlled: true,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
       builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setSheetState) => Padding(
-          padding: EdgeInsets.fromLTRB(20, 16, 20, MediaQuery.of(ctx).viewInsets.bottom + 20),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // Handle bar
-              Center(
-                child: Container(
-                  width: 40, height: 4,
-                  decoration: BoxDecoration(
-                    color: Theme.of(context).colorScheme.onSurface.withOpacity(0.2),
-                    borderRadius: BorderRadius.circular(2),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 12),
+        builder: (ctx, setSheetState) => AlertDialog(
+          insetPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 24),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          contentPadding: const EdgeInsets.fromLTRB(20, 20, 20, 20),
+          content: SizedBox(
+            width: double.maxFinite,
+            child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
               Center(
                 child: Text(l.get('default_settings'), style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
               ),
@@ -1780,8 +2101,14 @@ class _CalendarScreenState extends State<CalendarScreen> {
                       if (tempLumpSum) {
                         tempDefaultPayment = origDefaultPayment;
                         defaultPaymentController.text = _fmtNumInput(origDefaultPayment);
+                        tempDefaultLumpSumHours = origDefaultLumpSumHours;
+                        defaultLumpSumHoursController.text = origDefaultLumpSumHours > 0
+                            ? _fmtNumInput(origDefaultLumpSumHours)
+                            : '';
                         tempWorkplaceDaily = origWorkplaceDaily;
                         workplaceDailyController.text = origWorkplaceDaily;
+                        tempDefaultMemoDaily = origDefaultMemoDaily;
+                        defaultMemoDailyController.text = origDefaultMemoDaily;
                         tempTaxRateDaily = origTaxRateDaily;
                         settingsTaxDailyController.text = _fmtNumInput(origTaxRateDaily);
                         tempInsuranceRateDaily = origInsuranceRateDaily;
@@ -1801,6 +2128,8 @@ class _CalendarScreenState extends State<CalendarScreen> {
                         incentiveHourlyController.text = _fmtNumInput(origIncentiveHourly);
                         tempIncentiveEffectHours = origIncentiveEffectHours;
                         incentiveEffectHoursController.text = _fmtNumInput(origIncentiveEffectHours);
+                        tempDefaultMemoHourly = origDefaultMemoHourly;
+                        defaultMemoHourlyController.text = origDefaultMemoHourly;
                       }
                     });
                   },
@@ -1808,10 +2137,11 @@ class _CalendarScreenState extends State<CalendarScreen> {
               ),
               const SizedBox(height: 16),
 
-              // 단건 mode: default payment
+              // 단건 mode: default payment + optional hours (each its own row)
               if (tempLumpSum) ...[
                 Text(l.get('rate_setting'), style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: const Color(0xFF00B8A9))),
                 const SizedBox(height: 8),
+                // Row 1: payment (money)
                 TextField(
                   controller: defaultPaymentController,
                   keyboardType: const TextInputType.numberWithOptions(decimal: true),
@@ -1824,6 +2154,24 @@ class _CalendarScreenState extends State<CalendarScreen> {
                   onChanged: (v) {
                     final val = double.tryParse(v);
                     if (val != null && val >= 0) tempDefaultPayment = val;
+                  },
+                ),
+                const SizedBox(height: 12),
+                // Row 2: optional hours (so new lump sum entries prefill with time)
+                TextField(
+                  controller: defaultLumpSumHoursController,
+                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                  inputFormatters: _hoursFormatters,
+                  decoration: InputDecoration(
+                    labelText: l.get('hours_optional'),
+                    suffixText: 'h',
+                    floatingLabelBehavior: FloatingLabelBehavior.always,
+                    prefixIcon: const Icon(Icons.schedule, size: 18),
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                  ),
+                  onChanged: (v) {
+                    tempDefaultLumpSumHours = double.tryParse(v) ?? 0;
                   },
                 ),
                 const SizedBox(height: 12),
@@ -1929,6 +2277,7 @@ class _CalendarScreenState extends State<CalendarScreen> {
                 // Row 3: workplace (full width)
                 TextField(
                   controller: workplaceHourlyController,
+                  keyboardType: TextInputType.text,
                   decoration: InputDecoration(
                     labelText: l.get('workplace'),
                     floatingLabelBehavior: FloatingLabelBehavior.always,
@@ -1941,11 +2290,35 @@ class _CalendarScreenState extends State<CalendarScreen> {
                   },
                 ),
                 const SizedBox(height: 12),
+                // Default memo — hourly mode
+                TextField(
+                  controller: defaultMemoHourlyController,
+                  keyboardType: TextInputType.multiline,
+                  maxLines: 3,
+                  minLines: 2,
+                  textCapitalization: TextCapitalization.sentences,
+                  decoration: InputDecoration(
+                    labelText: l.get('memo'),
+                    floatingLabelBehavior: FloatingLabelBehavior.always,
+                    alignLabelWithHint: true,
+                    prefixIcon: const Padding(
+                      padding: EdgeInsets.only(bottom: 40),
+                      child: Icon(Icons.notes, size: 18),
+                    ),
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                  ),
+                  onChanged: (v) {
+                    tempDefaultMemoHourly = v;
+                  },
+                ),
+                const SizedBox(height: 12),
               ],
               // Workplace field — lump sum mode only (hourly has its own inside the rate section)
               if (tempLumpSum) ...[
                 TextField(
                   controller: workplaceDailyController,
+                  keyboardType: TextInputType.text,
                   decoration: InputDecoration(
                     labelText: l.get('workplace'),
                     floatingLabelBehavior: FloatingLabelBehavior.always,
@@ -1955,6 +2328,29 @@ class _CalendarScreenState extends State<CalendarScreen> {
                   ),
                   onChanged: (v) {
                     tempWorkplaceDaily = v;
+                  },
+                ),
+                const SizedBox(height: 12),
+                // Default memo — lump sum mode only
+                TextField(
+                  controller: defaultMemoDailyController,
+                  keyboardType: TextInputType.multiline,
+                  maxLines: 3,
+                  minLines: 2,
+                  textCapitalization: TextCapitalization.sentences,
+                  decoration: InputDecoration(
+                    labelText: l.get('memo'),
+                    floatingLabelBehavior: FloatingLabelBehavior.always,
+                    alignLabelWithHint: true,
+                    prefixIcon: const Padding(
+                      padding: EdgeInsets.only(bottom: 40),
+                      child: Icon(Icons.notes, size: 18),
+                    ),
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                  ),
+                  onChanged: (v) {
+                    tempDefaultMemoDaily = v;
                   },
                 ),
               ],
@@ -2057,6 +2453,9 @@ class _CalendarScreenState extends State<CalendarScreen> {
                         app.storage.setDefaultWorkplaceDaily(tempWorkplaceDaily);
                         app.storage.setDefaultLumpSum(tempLumpSum);
                         app.storage.setDefaultPayment(tempDefaultPayment);
+                        app.storage.setDefaultLumpSumHours(tempDefaultLumpSumHours);
+                        app.storage.setDefaultMemoDaily(tempDefaultMemoDaily);
+                        app.storage.setDefaultMemoHourly(tempDefaultMemoHourly);
                         app.setTaxRateHourly(tempTaxRateHourly);
                         app.setInsuranceRateHourly(tempInsuranceRateHourly);
                         app.setTaxRateDaily(tempTaxRateDaily);
@@ -2088,6 +2487,8 @@ class _CalendarScreenState extends State<CalendarScreen> {
           ),
         ),
       ),
+    ),
+  ),
     );
   }
 }
@@ -2106,6 +2507,9 @@ class _EntryDraft {
   double insuranceRate;
   double incentivePercent;
   double incentiveEffectHours;
+  String memo;
+  // Optional worked-hours for lump-sum (일시금) entries. 0 = not entered.
+  double lumpSumHours;
 
   _EntryDraft({
     required this.value,
@@ -2118,6 +2522,8 @@ class _EntryDraft {
     this.insuranceRate = 0,
     this.incentivePercent = 0,
     this.incentiveEffectHours = 0,
+    this.memo = '',
+    this.lumpSumHours = 0,
   });
 
   factory _EntryDraft.fromEntry(WorkEntry e) => _EntryDraft(
@@ -2131,6 +2537,26 @@ class _EntryDraft {
         insuranceRate: e.insuranceRate,
         incentivePercent: e.incentivePercent,
         incentiveEffectHours: e.incentiveEffectHours,
+        memo: e.memo,
+        lumpSumHours: e.lumpSumHours,
+      );
+
+  /// Shallow copy used for "sticky defaults" — when the user opens a fresh
+  /// cell, we prefill with whatever they entered last, so repeated editing
+  /// doesn't require re-typing the same rate / workplace / hours each time.
+  factory _EntryDraft.copyFrom(_EntryDraft o) => _EntryDraft(
+        value: o.value,
+        rate: o.rate,
+        isLumpSum: o.isLumpSum,
+        isOvertime: o.isOvertime,
+        isNightShift: o.isNightShift,
+        workplace: o.workplace,
+        taxRate: o.taxRate,
+        insuranceRate: o.insuranceRate,
+        incentivePercent: o.incentivePercent,
+        incentiveEffectHours: o.incentiveEffectHours,
+        memo: o.memo,
+        lumpSumHours: o.lumpSumHours,
       );
 
   factory _EntryDraft.newDefault(
@@ -2150,6 +2576,19 @@ class _EntryDraft {
       insuranceRate: app.insuranceRate(lump),
       incentivePercent: lump ? 0 : app.incentiveHourly,
       incentiveEffectHours: lump ? 0 : app.incentiveEffectHoursHourly,
+      memo: lump ? app.storage.getDefaultMemoDaily() : app.storage.getDefaultMemoHourly(),
+      lumpSumHours: lump ? app.storage.getDefaultLumpSumHours() : 0,
     );
   }
+}
+
+
+/// Per-month replacement bucket used by the cross-month paste logic.
+/// Each bucket maps a date-key -> the new entries that should occupy
+/// that day, replacing any existing entries on the same day.
+class _MonthBucket {
+  final int year;
+  final int month;
+  final Map<String, List<WorkEntry>> replacements = {};
+  _MonthBucket(this.year, this.month);
 }
